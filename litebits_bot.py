@@ -3,14 +3,12 @@
 # Dev: EAGLE SCRIPT | TG: t.me/eaglescrip
 
 import requests
-import json
 import time
 import random
 import os
 import sys
 import logging
 
-# ===== LOGGING SETUP =====
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s',
@@ -20,36 +18,31 @@ logging.basicConfig(
 log = logging.getLogger("LiteBits")
 
 BASE_URL = "https://mini.litebits.io"
-
-# ===== CONFIG FROM ENV =====
 INIT_DATA = os.environ.get("LITEBITS_INIT", "").strip()
-PROXY_STR  = os.environ.get("PROXY", "http://kcartik:kcartik@chill-ki-mutt.kcartik-vps.tech:22425").strip()
-
-def get_proxy():
-    if not PROXY_STR:
-        return None
-    return {
-        "http":  PROXY_STR,
-        "https": PROXY_STR,
-    }
 
 class LiteBits:
     def __init__(self, init_data):
         self.init = init_data
         self.token = None
+        self.cookie = ""
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 Chrome/148.0.7778.178 Mobile Safari/537.36 Telegram-Android/12.1.1",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-            "Origin": BASE_URL,
-            "X-Requested-With": "com.radolyn.ayugram",
+            "user-agent": "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.7778.178 Mobile Safari/537.36 Telegram-Android/12.1.1 (Xiaomi 23076RN4BI; Android 15; SDK 35; AVERAGE)",
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "en,en-GB;q=0.9,en-US;q=0.8",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "sec-ch-ua": '"Chromium";v="148", "Android WebView";v="148", "Not/A)Brand";v="99"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-dest": "empty",
+            "origin": BASE_URL,
+            "x-requested-with": "com.radolyn.ayugram",
+            "priority": "u=1, i",
         }
 
     def new_session(self):
         s = requests.Session()
-        proxy = get_proxy()
-        if proxy:
-            s.proxies.update(proxy)
         return s
 
     def auth(self):
@@ -58,9 +51,16 @@ class LiteBits:
             resp = session.post(
                 f"{BASE_URL}/api/auth/telegram/validate",
                 json={"initData": self.init},
-                headers={**self.headers, "Content-Type": "application/json", "Referer": f"{BASE_URL}/"},
+                headers={
+                    **self.headers,
+                    "content-type": "application/json",
+                    "referer": f"{BASE_URL}/",
+                },
                 timeout=30
             )
+            # Save cookies from auth
+            self.cookie = "; ".join([f"{k}={v}" for k, v in session.cookies.items()])
+
             data = resp.json()
             if data.get("success"):
                 self.token = data["token"]
@@ -77,27 +77,33 @@ class LiteBits:
         session = self.new_session()
         time.sleep(random.uniform(1, 3))
 
-        x = random.randint(250, 320)
-        y = random.randint(420, 480)
-
         try:
+            claim_headers = {
+                **self.headers,
+                "authorization": f"Bearer {self.token}",
+                "content-type": "application/json",
+                "referer": f"{BASE_URL}/?v5",
+            }
+            if self.cookie:
+                claim_headers["cookie"] = self.cookie
+
+            payload = {
+                "h-captcha-response": "",
+                "captchaProvider": "hcaptcha",
+                "tapTimings": [],
+                "fingerprint": ""
+            }
+
+            log.info(f"📤 Sending claim payload: {payload}")
+
             resp = session.post(
                 f"{BASE_URL}/api/claim/start",
-                json={
-                    "h-captcha-response": "",
-                    "captchaProvider": "hcaptcha",
-                    "tapTimings": [{"delay": 0, "x": x, "y": y}],
-                    "fingerprint": ""
-                },
-                headers={
-                    **self.headers,
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                    "Referer": f"{BASE_URL}/"
-                },
+                json=payload,
+                headers=claim_headers,
                 timeout=30
             )
 
+            log.info(f"📥 Claim start response: {resp.text[:200]}")
             data = resp.json()
 
             if not data.get("success") or not data.get("claimId"):
@@ -113,14 +119,13 @@ class LiteBits:
                 f"{BASE_URL}/api/claim/{claim_id}/complete",
                 json={},
                 headers={
-                    **self.headers,
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                    "Referer": f"{BASE_URL}/"
+                    **claim_headers,
+                    "content-length": "2",
                 },
                 timeout=30
             )
 
+            log.info(f"📥 Complete response: {resp.text[:200]}")
             data = resp.json()
 
             if data.get("success"):
@@ -137,10 +142,9 @@ class LiteBits:
 
     def run(self):
         log.info("🦅 LiteBits Bot starting...")
-        log.info(f"🔌 Proxy: {PROXY_STR[:30]}..." if PROXY_STR else "🔌 Proxy: None")
 
         if not INIT_DATA:
-            log.error("❌ LITEBITS_INIT env var not set! Set it in Render environment variables.")
+            log.error("❌ LITEBITS_INIT env var not set!")
             sys.exit(1)
 
         if not self.auth():
@@ -160,7 +164,6 @@ class LiteBits:
                 log.info(f"💰 Total earned: {total_earned} STOSHI")
             else:
                 log.warning("✗ Claim failed, will retry after cooldown")
-                # Re-auth on failure
                 log.info("🔄 Re-authenticating...")
                 self.auth()
 
@@ -172,4 +175,4 @@ class LiteBits:
 if __name__ == "__main__":
     bot = LiteBits(INIT_DATA)
     bot.run()
-          
+  
