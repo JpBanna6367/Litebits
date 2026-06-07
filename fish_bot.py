@@ -190,12 +190,11 @@ class Fishverse:
                 if t["id"] in ["task_ad_adsgram_interstitial", "task_ad_monetag", "task_1780057810372"]
             )
             if remaining_all == 0:
-                log.info("🛑 All Ads Watched! Waiting 1 hour...")
-                time.sleep(3600)
-                ad_count = 0
+                log.info("🛑 All Ads Watched! Bot stopping.")
+                sys.exit(0)
 
 
 if __name__ == "__main__":
     bot = Fishverse(INIT_DATA)
     bot.run()
-  
+    
