@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-# 🦅 LITEBITS.IO BOT - RENDER READY
+# 🦅 FISHVERSE AUTO BOT - RENDER READY
 # Dev: EAGLE SCRIPT | TG: t.me/eaglescrip
 
 import requests
+import uuid
+import hashlib
 import time
 import random
+import json
 import os
 import sys
 import logging
+from urllib.parse import unquote
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,164 +19,183 @@ logging.basicConfig(
     datefmt='%H:%M:%S',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("LiteBits")
+log = logging.getLogger("Fishverse")
 
-BASE_URL = "https://mini.litebits.io"
-INIT_DATA = os.environ.get("LITEBITS_INIT", "").strip()
+INIT_DATA = os.environ.get("FISH_INIT", "").strip()
 
-class LiteBits:
+class Fishverse:
     def __init__(self, init_data):
+        self.base = "https://api.fishverse.site/api"
         self.init = init_data
-        self.token = None
-        self.cookie = ""
+        self.device_id = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()[:64].upper()
+
+        decoded = unquote(init_data)
+        try:
+            s = decoded.find('{"id"')
+            e = decoded.find('}', decoded.find('photo_url')) + 1
+            self.user = json.loads(decoded[s:e])
+        except:
+            self.user = {}
+
         self.headers = {
-            "user-agent": "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.7778.178 Mobile Safari/537.36 Telegram-Android/12.1.1 (Xiaomi 23076RN4BI; Android 15; SDK 35; AVERAGE)",
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "en,en-GB;q=0.9,en-US;q=0.8",
-            "accept-encoding": "gzip, deflate, br, zstd",
-            "sec-ch-ua": '"Chromium";v="148", "Android WebView";v="148", "Not/A)Brand";v="99"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty",
-            "origin": BASE_URL,
-            "x-requested-with": "com.radolyn.ayugram",
-            "priority": "u=1, i",
+            "Content-Type": "application/json",
+            "Origin": "https://fishverse.site",
+            "Referer": "https://fishverse.site/",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 15; K) Telegram-Android/12.2.11 (Xiaomi 23076RN4BI; Android 15; SDK 35; AVERAGE)",
+            "Authorization": f"Bearer {init_data}",
+            "X-Requested-With": "org.telegram.messenger.web"
         }
 
-    def new_session(self):
-        s = requests.Session()
-        return s
-
     def auth(self):
-        session = self.new_session()
-        try:
-            resp = session.post(
-                f"{BASE_URL}/api/auth/telegram/validate",
-                json={"initData": self.init},
-                headers={
-                    **self.headers,
-                    "content-type": "application/json",
-                    "referer": f"{BASE_URL}/",
-                },
-                timeout=30
-            )
-            # Save cookies from auth
-            self.cookie = "; ".join([f"{k}={v}" for k, v in session.cookies.items()])
+        r = requests.post(f"{self.base}/auth",
+                         json={"initData": self.init, "start_param": None, "device_id": self.device_id},
+                         headers=self.headers)
+        return r.json()
 
-            data = resp.json()
-            if data.get("success"):
-                self.token = data["token"]
-                bal = data.get('user', {}).get('balance', '?')
-                log.info(f"✅ Login OK | Balance: {bal} STOSHI")
-                return True
-            log.warning(f"❌ Login failed: {data}")
-            return False
-        except Exception as e:
-            log.error(f"Auth error: {e}")
-            return False
+    def get_tasks(self):
+        return requests.get(f"{self.base}/tasks", headers=self.headers).json()
 
-    def claim(self):
-        session = self.new_session()
-        time.sleep(random.uniform(1, 3))
+    def complete_task(self, task_id):
+        return requests.post(f"{self.base}/tasks/complete",
+                            json={"task_id": task_id}, headers=self.headers).json()
 
-        try:
-            claim_headers = {
-                **self.headers,
-                "authorization": f"Bearer {self.token}",
-                "content-type": "application/json",
-                "referer": f"{BASE_URL}/?v5",
-            }
-            if self.cookie:
-                claim_headers["cookie"] = self.cookie
+    def ad_notify(self, block_id):
+        requests.post("https://fishverse.site/api/user/ad-click-notify",
+                     json={"userId": int(self.user.get("id", 0)),
+                           "username": self.user.get("username", ""),
+                           "firstName": self.user.get("first_name", ""),
+                           "blockId": block_id,
+                           "timezone": "Asia/Calcutta"},
+                     headers={**self.headers, "X-Requested-With": "org.telegram.messenger.web"})
 
-            payload = {
-                "h-captcha-response": "",
-                "captchaProvider": "hcaptcha",
-                "tapTimings": [],
-                "fingerprint": ""
-            }
-
-            log.info(f"📤 Sending claim payload: {payload}")
-
-            resp = session.post(
-                f"{BASE_URL}/api/claim/start",
-                json=payload,
-                headers=claim_headers,
-                timeout=30
-            )
-
-            log.info(f"📥 Claim start response: {resp.text[:200]}")
-            data = resp.json()
-
-            if not data.get("success") or not data.get("claimId"):
-                log.warning(f"⚠️ Claim start failed: {data}")
-                return None
-
-            claim_id = data["claimId"]
-            wait = random.randint(15, 17)
-            log.info(f"📺 Watching ad... {wait}s")
-            time.sleep(wait)
-
-            resp = session.post(
-                f"{BASE_URL}/api/claim/{claim_id}/complete",
-                json={},
-                headers={
-                    **claim_headers,
-                    "content-length": "2",
-                },
-                timeout=30
-            )
-
-            log.info(f"📥 Complete response: {resp.text[:200]}")
-            data = resp.json()
-
-            if data.get("success"):
-                reward = data.get("reward", 0)
-                log.info(f"✨ REWARD: {reward} STOSHI")
-                return reward
-
-            log.warning(f"⚠️ Claim complete failed: {data}")
+    def watch_adsgram(self, block_id, slot_index):
+        log.info("📺 Watching AdsGram Ad...")
+        session = requests.post(f"{self.base}/ads/issue-session",
+                               json={"context": "task_watch"}, headers=self.headers).json()
+        if not session.get("ok"):
             return None
+        st = int(time.time() * 1000)
+        wait = random.randint(12, 15)
+        log.info(f"⏳ Watching... {wait}s")
+        time.sleep(wait)
+        self.ad_notify(block_id)
+        return requests.post(f"{self.base}/tasks/claim-ad", json={
+            "type": "adsgram", "clicked": True, "watch_start_ms": st,
+            "slot_index": slot_index, "session_token": session["session_token"],
+            "category": "task_watch", "block_id": block_id
+        }, headers=self.headers).json()
 
-        except Exception as e:
-            log.error(f"Claim error: {e}")
+    def watch_monetag(self, slot_index):
+        log.info("📺 Watching Monetag Ad...")
+        session = requests.post(f"{self.base}/ads/issue-session",
+                               json={"context": "task_watch"}, headers=self.headers).json()
+        if not session.get("ok"):
             return None
+        st = int(time.time() * 1000)
+        wait = random.randint(12, 15)
+        log.info(f"⏳ Watching... {wait}s")
+        time.sleep(wait)
+        self.ad_notify("31041")
+        return requests.post(f"{self.base}/tasks/claim-ad", json={
+            "type": "monetag", "clicked": True, "watch_start_ms": st,
+            "slot_index": slot_index, "category": "task_watch"
+        }, headers=self.headers).json()
+
+    def watch_monetix(self, slot_index):
+        log.info("📺 Watching Monetix Ad...")
+        watch_time = random.randint(15, 17)
+        log.info(f"⏳ Watching... {watch_time}s")
+        time.sleep(watch_time)
+        st = int(time.time() * 1000) - (watch_time * 1000)
+        return requests.post(f"{self.base}/tasks/claim-monetix", json={
+            "task_id": "task_1780057810372",
+            "watch_start_ms": st,
+            "slot_index": slot_index
+        }, headers=self.headers).json()
 
     def run(self):
-        log.info("🦅 LiteBits Bot starting...")
+        log.info("🦅 Fishverse Bot starting...")
 
         if not INIT_DATA:
-            log.error("❌ LITEBITS_INIT env var not set!")
+            log.error("❌ FISH_INIT env var not set!")
             sys.exit(1)
 
-        if not self.auth():
-            log.error("❌ Auth failed, exiting.")
+        auth = self.auth()
+        if not auth.get("ok"):
+            log.error(f"❌ Login Failed: {auth}")
             sys.exit(1)
 
-        claim_count = 0
-        total_earned = 0
+        user = auth['user']
+        log.info(f"✅ Login OK | Balance: {user['balance']} eggs")
+
+        # Partner tasks
+        tasks = self.get_tasks()
+        partner_tasks = [t for t in tasks.get("tasks", []) if t["type"] == "partner" and not t.get("done")]
+        for task in partner_tasks:
+            log.info(f"📋 Partner Task: {task.get('title', task['id'])}")
+            result = self.complete_task(task["id"])
+            if result.get("ok"):
+                log.info(f"✨ +{result.get('reward_eggs', 0)} FISH | Partner task done")
+            time.sleep(random.randint(5, 8))
+
+        ad_count = 0
 
         while True:
-            claim_count += 1
-            log.info(f"--- Claim #{claim_count} ---")
-            result = self.claim()
+            tasks = self.get_tasks()
+            if not tasks.get("ok"):
+                log.error("Failed to get tasks, retrying in 60s...")
+                time.sleep(60)
+                continue
 
-            if result:
-                total_earned += result
-                log.info(f"💰 Total earned: {total_earned} STOSHI")
-            else:
-                log.warning("✗ Claim failed, will retry after cooldown")
-                log.info("🔄 Re-authenticating...")
-                self.auth()
+            # AdsGram
+            for t in tasks["tasks"]:
+                if t["id"] == "task_ad_adsgram_interstitial" and t.get("remaining", 0) > 0:
+                    slot = t["ad_limit"] - t["remaining"]
+                    r = self.watch_adsgram(t.get("ad_block_id", ""), slot)
+                    if r and r.get("ok"):
+                        ad_count += 1
+                        log.info(f"✨ +{r.get('reward_eggs', 5)} FISH | AdsGram #{ad_count}")
+                    time.sleep(random.randint(3, 6))
 
-            cd = random.randint(290, 310)
-            log.info(f"⏳ Next claim in {cd//60}m {cd%60}s")
-            time.sleep(cd)
+            # Monetag
+            for t in tasks["tasks"]:
+                if t["id"] == "task_ad_monetag" and t.get("remaining", 0) > 0:
+                    slot = t["ad_limit"] - t["remaining"]
+                    r = self.watch_monetag(slot)
+                    if r and r.get("ok"):
+                        ad_count += 1
+                        log.info(f"✨ +{r.get('reward_eggs', 5)} FISH | Monetag #{ad_count}")
+                    time.sleep(random.randint(3, 6))
+
+            # Monetix
+            for t in tasks["tasks"]:
+                if t["id"] == "task_1780057810372" and t.get("remaining", 0) > 0:
+                    slot = t.get("ad_limit", 20) - t.get("remaining", 0)
+                    r = self.watch_monetix(slot)
+                    if r and r.get("ok"):
+                        ad_count += 1
+                        reward = r.get('reward', r.get('reward_eggs', 8))
+                        log.info(f"✨ +{reward} FISH | Monetix #{ad_count}")
+                    time.sleep(random.randint(3, 6))
+
+            # Cooldown every 5 ads
+            if ad_count % 5 == 0 and ad_count > 0:
+                cd = random.randint(180, 300)
+                log.info(f"⏳ Cooldown {cd}s...")
+                time.sleep(cd)
+                log.info("✅ Cooldown done! Resuming...")
+
+            remaining_all = sum(
+                t.get("remaining", 0) for t in tasks["tasks"]
+                if t["id"] in ["task_ad_adsgram_interstitial", "task_ad_monetag", "task_1780057810372"]
+            )
+            if remaining_all == 0:
+                log.info("🛑 All Ads Watched! Waiting 1 hour...")
+                time.sleep(3600)
+                ad_count = 0
 
 
 if __name__ == "__main__":
-    bot = LiteBits(INIT_DATA)
+    bot = Fishverse(INIT_DATA)
     bot.run()
   
